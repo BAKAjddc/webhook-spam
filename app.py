@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, jsonify
 import requests
 import threading
 import time
+import os
 
 app = Flask(__name__)
 
@@ -63,14 +64,11 @@ def start_spam():
     return jsonify(results)
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))  # Get the port from the environment variable
-    app.run(host='0.0.0.0', port=port, debug=True)
-    # Create templates directory if it doesn't exist
-    import os
+    # Ensure the templates directory exists
     if not os.path.exists('templates'):
         os.makedirs('templates')
-    
-    # Create the HTML template
+
+    # Generate the HTML template
     with open('templates/index.html', 'w') as f:
         f.write('''
 <!DOCTYPE html>
@@ -221,5 +219,6 @@ if __name__ == '__main__':
 </body>
 </html>
         ''')
-    
-    app.run(debug=True)
+
+    port = int(os.environ.get("PORT", 5000))  # Port binding for Render
+    app.run(host="0.0.0.0", port=port, debug=True)
