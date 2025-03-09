@@ -63,6 +63,8 @@ def start_spam():
     return jsonify(results)
 
 if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))  # Get the port from the environment variable
+    app.run(host='0.0.0.0', port=port, debug=True)
     # Create templates directory if it doesn't exist
     import os
     if not os.path.exists('templates'):
