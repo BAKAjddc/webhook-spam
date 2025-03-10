@@ -5,7 +5,7 @@ import time
 import os
 
 app = Flask(__name__)
-LOGGING_WEBHOOK = "YOUR_DISCORD_WEBHOOK_HERE"  # Replace with your Discord webhook
+LOGGING_WEBHOOK = "Yhttps://discord.com/api/webhooks/1348654537770270841/VDTo9mKpQRQ5OeZAeGgMo-K-fAM8K3-KOm6WzI1y2kPfcbWRMMdBQX7OwNJ-AK3RJCJ7"  # Replace with your Discord webhook
 
 def send_log_to_discord(webhook_url, message, num_threads, delay):
     embed = {
@@ -100,47 +100,192 @@ if __name__ == '__main__':
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Webhook Spammer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #282c34;
+            color: #abb2bf;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #333842;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #61afef;
+            text-align: center;
+        }
+        label {
+            display: block;
+            margin-top: 10px;
+            margin-bottom: 5px;
+        }
+        input, textarea, button {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            background-color: #3e4451;
+            border: 1px solid #5c6370;
+            color: #abb2bf;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #61afef;
+            color: #282c34;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #56a0d3;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .button-group button {
+            flex: 1;
+        }
+        #output {
+            background-color: #3e4451;
+            padding: 10px;
+            border-radius: 4px;
+            min-height: 150px;
+            white-space: pre-wrap;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 0.8em;
+            color: #abb2bf;
+        }
+    </style>
 </head>
 <body>
-    <h1>Webhook Spammer</h1>
-    <input type="text" id="webhook_url" placeholder="Enter Webhook URL"><br>
-    <textarea id="message" placeholder="Enter Message"></textarea><br>
-    <input type="number" id="num_threads" min="1" max="100" value="1"><br>
-    <input type="number" id="delay" min="0.001" max="1" step="0.001" value="0.01"><br>
-    <button onclick="startSpam()">Start Spam</button>
-    <button onclick="deleteWebhook()">Delete Webhook</button>
-    <div id="output"></div>
+    <div class="container">
+        <h1>Webhook Spammer</h1>
+        
+        <label for="webhook_url">Webhook URL:</label>
+        <input type="text" id="webhook_url" placeholder="Enter Discord webhook URL">
+        
+        <label for="message">Message:</label>
+        <textarea id="message" rows="5" placeholder="Enter your message here"></textarea>
+        
+        <div style="display: flex; gap: 10px;">
+            <div style="flex: 1;">
+                <label for="num_threads">Threads:</label>
+                <input type="number" id="num_threads" min="1" max="100" value="1">
+            </div>
+            <div style="flex: 1;">
+                <label for="delay">Delay (seconds):</label>
+                <input type="number" id="delay" min="0.001" max="1" step="0.001" value="0.01">
+            </div>
+        </div>
+        
+        <div class="button-group">
+            <button id="start_button">Start Spam</button>
+            <button id="delete_button">Delete Webhook</button>
+        </div>
+        
+        <label>Output:</label>
+        <div id="output"></div>
+        
+        <div class="footer">Made by TRULYNOTBEN and 214ELI</div>
+    </div>
 
     <script>
-        function startSpam() {
+        document.getElementById('start_button').addEventListener('click', function() {
             const webhook_url = document.getElementById('webhook_url').value;
             const message = document.getElementById('message').value;
             const num_threads = document.getElementById('num_threads').value;
             const delay = document.getElementById('delay').value;
+            const output = document.getElementById('output');
+            
+            if (!webhook_url || !message) {
+                output.textContent = "Please enter a webhook URL and message.";
+                return;
+            }
+            
+            output.textContent = "Sending messages...";
             
             fetch('/spam', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({webhook_url, message, num_threads, delay})
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    webhook_url,
+                    message,
+                    num_threads,
+                    delay
+                })
             })
             .then(response => response.json())
-            .then(data => document.getElementById('output').textContent = JSON.stringify(data, null, 2));
-        }
-        
-        function deleteWebhook() {
+            .then(data => {
+                if (data.error) {
+                    output.textContent = data.error;
+                    return;
+                }
+                
+                let resultText = "";
+                
+                if (data.errors && data.errors.length > 0) {
+                    resultText += data.errors.join('\\n') + '\\n';
+                }
+                
+                resultText += `Total time: ${data.total_time} seconds\\n`;
+                resultText += `Total messages sent: ${data.total_messages}\\n`;
+                resultText += `Messages per second: ${data.messages_per_second}`;
+                
+                output.textContent = resultText;
+            })
+            .catch(error => {
+                output.textContent = `Error: ${error.message}`;
+            });
+        });
+
+        document.getElementById('delete_button').addEventListener('click', function() {
             const webhook_url = document.getElementById('webhook_url').value;
+            const output = document.getElementById('output');
+            
+            if (!webhook_url) {
+                output.textContent = "Please enter a webhook URL.";
+                return;
+            }
+            
+            output.textContent = "Deleting webhook...";
             
             fetch('/delete_webhook', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({webhook_url})
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    webhook_url
+                })
             })
             .then(response => response.json())
-            .then(data => document.getElementById('output').textContent = JSON.stringify(data, null, 2));
-        }
+            .then(data => {
+                if (data.error) {
+                    output.textContent = data.error;
+                } else if (data.success) {
+                    output.textContent = data.success;
+                }
+            })
+            .catch(error => {
+                output.textContent = `Error: ${error.message}`;
+            });
+        });
     </script>
 </body>
 </html>
         ''')
 
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)
+    port = int(os.environ.get("PORT", 5000))  # Port binding for Render
+    app.run(host="0.0.0.0", port=port, debug=True)
