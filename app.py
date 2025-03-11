@@ -8,6 +8,9 @@ app = Flask(__name__)
 # Fix the logging issue by setting a default webhook but making it optional
 LOGGING_WEBHOOK = os.environ.get("LOGGING_WEBHOOK", "")  # You can set this as an environment variable
 
+# Global flag to control spam threads
+stop_flag = False
+
 def send_log_to_discord(webhook_url, message, num_threads, delay):
     # Only try to log if a logging webhook is configured
     if LOGGING_WEBHOOK:
@@ -31,10 +34,17 @@ def send_log_to_discord(webhook_url, message, num_threads, delay):
             pass
 
 def spam_webhook(webhook_url, message, num_threads, delay):
+    global stop_flag
+    stop_flag = False  # Reset flag at start of operation
+    
     results = {"errors": [], "total_time": 0, "total_messages": 0, "messages_per_second": 0}
     
     def send_message():
         try:
+            # Check if operation should stop
+            if stop_flag:
+                return
+                
             data = {"content": message}
             response = requests.post(webhook_url, json=data, timeout=5)  # Added timeout
             if response.status_code != 204:  # Discord returns 204 on success
@@ -46,6 +56,10 @@ def spam_webhook(webhook_url, message, num_threads, delay):
     start_time = time.time()
     
     for _ in range(num_threads):
+        # Check if operation should stop
+        if stop_flag:
+            break
+            
         thread = threading.Thread(target=send_message)
         threads.append(thread)
         thread.start()
@@ -55,8 +69,14 @@ def spam_webhook(webhook_url, message, num_threads, delay):
         thread.join()
     
     total_time = time.time() - start_time
-    total_messages = num_threads
+    # Count actual messages sent (may be less than num_threads if stopped)
+    total_messages = len(threads)
     messages_per_second = total_messages / total_time if total_time > 0 else 0
+    
+    # If stopped early, add to results
+    if stop_flag:
+        results["stopped"] = True
+        results["message"] = "Operation stopped by user."
     
     results.update({
         "total_time": round(total_time, 2), 
@@ -114,6 +134,12 @@ def start_spam():
         results["warning"] = "Note: Using a delay less than 0.5 seconds may result in some messages not being delivered."
     
     return jsonify(results)
+
+@app.route('/stop_spam', methods=['POST'])
+def stop_spam():
+    global stop_flag
+    stop_flag = True
+    return jsonify({"success": "Stop signal sent. Stopping all message sending..."})
 
 @app.route('/delete_webhook', methods=['POST'])
 def delete_webhook():
@@ -188,6 +214,20 @@ if __name__ == '__main__':
         button:hover {
             background-color: #56a0d3;
         }
+        button#stop_button {
+            background-color: #e06c75;
+        }
+        button#stop_button:hover {
+            background-color: #c25d66;
+        }
+        button#stop_button:disabled {
+            background-color: #6e4246;
+            cursor: not-allowed;
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
         .button-group {
             display: flex;
             gap: 10px;
@@ -246,6 +286,7 @@ if __name__ == '__main__':
         
         <div class="button-group">
             <button id="start_button">Start Spam</button>
+            <button id="stop_button" disabled>Stop Spam</button>
             <button id="delete_button">Delete Webhook</button>
         </div>
         
@@ -259,6 +300,13 @@ if __name__ == '__main__':
         // Show delay warning when delay is less than 0.5
         const delayInput = document.getElementById('delay');
         const delayWarning = document.getElementById('delay-warning');
+        const startButton = document.getElementById('start_button');
+        const stopButton = document.getElementById('stop_button');
+        const deleteButton = document.getElementById('delete_button');
+        const output = document.getElementById('output');
+        
+        // Track whether an operation is in progress
+        let isOperationInProgress = false;
         
         function updateDelayWarning() {
             const delay = parseFloat(delayInput.value) || 0;
@@ -276,12 +324,19 @@ if __name__ == '__main__':
         delayInput.addEventListener('input', updateDelayWarning);
         delayInput.addEventListener('change', updateDelayWarning);
         
+        // Function to update UI state
+        function updateUIState(operating) {
+            isOperationInProgress = operating;
+            startButton.disabled = operating;
+            stopButton.disabled = !operating;
+            deleteButton.disabled = operating;
+        }
+        
         document.getElementById('start_button').addEventListener('click', function() {
             const webhook_url = document.getElementById('webhook_url').value.trim();
             const message = document.getElementById('message').value;
             let num_threads = parseInt(document.getElementById('num_threads').value) || 1;
             let delay = parseFloat(document.getElementById('delay').value) || 0.01;
-            const output = document.getElementById('output');
             
             // Validate inputs
             if (!webhook_url || !webhook_url.startsWith('http')) {
@@ -300,6 +355,9 @@ if __name__ == '__main__':
             if (delay < 0.001) delay = 0.001;
             if (delay > 1) delay = 1;
             
+            // Update UI state
+            updateUIState(true);
+            
             output.textContent = "Sending messages...";
             
             fetch('/spam', {
@@ -316,12 +374,19 @@ if __name__ == '__main__':
             })
             .then(response => response.json())
             .then(data => {
+                // Reset UI state
+                updateUIState(false);
+                
                 if (data.error) {
                     output.textContent = data.error;
                     return;
                 }
                 
                 let resultText = "";
+                
+                if (data.stopped) {
+                    resultText += "Operation stopped by user.\\n\\n";
+                }
                 
                 if (data.errors && data.errors.length > 0) {
                     resultText += data.errors.join('\\n') + '\\n\\n';
@@ -338,13 +403,37 @@ if __name__ == '__main__':
                 output.textContent = resultText;
             })
             .catch(error => {
+                // Reset UI state
+                updateUIState(false);
+                output.textContent = `Error: ${error.message}`;
+            });
+        });
+
+        document.getElementById('stop_button').addEventListener('click', function() {
+            output.textContent = "Stopping spam operation...";
+            
+            fetch('/stop_spam', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({})
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    output.textContent = data.error;
+                } else if (data.success) {
+                    output.textContent = data.success;
+                }
+            })
+            .catch(error => {
                 output.textContent = `Error: ${error.message}`;
             });
         });
 
         document.getElementById('delete_button').addEventListener('click', function() {
             const webhook_url = document.getElementById('webhook_url').value.trim();
-            const output = document.getElementById('output');
             
             if (!webhook_url || !webhook_url.startsWith('http')) {
                 output.textContent = "Please enter a valid webhook URL starting with http:// or https://";
